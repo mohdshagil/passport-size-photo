@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self';
+             script-src 'self' 'unsafe-eval' blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://sdk.cashfree.com;
+             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com;
+             font-src 'self' https://fonts.gstatic.com;
+             img-src 'self' data: blob:;
+             connect-src 'self' blob: data: https://cdn.jsdelivr.net https://unpkg.com https://staticimgly.com https://*.staticimgly.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.cdn.hf.co https://*.aws.cdn.hf.co https://*.amazonaws.com https://*.cloudfront.net https://sandbox.cashfree.com https://api.cashfree.com;
+             worker-src 'self' blob:;
+             frame-src 'self' https://sdk.cashfree.com https://sandbox.cashfree.com https://api.cashfree.com;
+             base-uri 'self'; form-action 'self';">
+  <title>Passport Photo Maker — Print Ready</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ── Left Icon Navigation ─────────────────────────────────────── -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-logo" title="Passport Photo Maker">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="9" r="2"/><path d="M3 20l5-5 4 4 3-3 6 4"/></svg>
+    </div>
+
+    <div class="sidebar-tabs">
+      <button class="stab active" data-tab="editor" title="Editor Panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <span>Editor</span>
+      </button>
+      <button class="stab" data-tab="export" title="Print / Export">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        <span>Print &amp; Export</span>
+      </button>
+    </div>
+
+    <div class="sidebar-bottom">
+      <button class="stab-icon" id="btn-theme" title="Toggle Theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="theme-icon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- ── Control Panel ─────────────────────────────────────────────── -->
+  <aside class="panel" id="panel">
+
+    <!-- User Account Bar -->
+    <div class="user-account-bar" id="user-account-bar"></div>
+
+    <!-- ─ Editor Panel (Collapsible Sections Accordion) ─ -->
+    <div class="tab-panel active" id="tab-editor">
+      <div class="panel-header">
+        <h2 class="panel-title">Editor Tools</h2>
+      </div>
+
+      <div class="editor-scroll-container">
+        
+        <!-- Accordion 1: Photos -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">📷 Photos</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="dropzone" id="dropzone">
+              <input type="file" id="file-input" accept="image/jpeg,image/jpg,image/png,image/webp" multiple hidden>
+              <div class="dropzone-inner">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <p>Drag photos here or <span class="link">Browse</span></p>
+                <small>JPG, PNG, WebP · Multiple files</small>
+              </div>
+            </div>
+
+            <div class="photo-grid" id="photo-grid"></div>
+
+            <!-- Multi-select action bar -->
+            <div class="multi-select-bar" id="multi-select-bar" style="display:none">
+              <span class="multi-sel-label" id="multi-sel-count">0 selected</span>
+              <div class="multi-sel-actions">
+                <button class="btn-sm btn-brand" id="btn-rmbg-selected">✨ Remove BG</button>
+                <button class="btn-sm btn-secondary" id="btn-reset-selected">↺ Reset</button>
+              </div>
+              <div class="multi-sel-links">
+                <button class="link-btn" id="btn-select-all">All</button>
+                <span style="color:var(--text-muted)">·</span>
+                <button class="link-btn" id="btn-deselect-all">None</button>
+              </div>
+            </div>
+
+            <button class="btn-secondary btn-block" id="btn-add-more" style="display:none; margin-top:8px">
+              + Add More Photos
+            </button>
+
+            <div class="privacy-note">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Photos processed locally · Never uploaded
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 2: Crop & Adjust -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">✂️ Crop &amp; Adjust</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="selected-photo-card" id="selected-card">
+              <div class="selected-photo-preview" id="selected-preview">
+                <div class="no-selection-msg">Select a photo from the list above</div>
+              </div>
+              <div class="selected-photo-name" id="selected-name">No photo selected</div>
+            </div>
+
+            <button class="btn-primary btn-block" id="btn-crop" disabled>Crop / Adjust Photo</button>
+
+            <!-- Per-photo Copies List (rendered dynamically by JS) -->
+            <div id="copies-list-container" style="display:none">
+              <label class="form-label" style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Copies on sheet</label>
+              <div id="copies-list"></div>
+            </div>
+
+            <!-- Filters & Adjustments -->
+            <div class="form-group slider-group mt-2">
+              <label class="form-label">Brightness: <span id="brightness-val">100</span>%</label>
+              <input type="range" id="slider-brightness" min="50" max="150" value="100" class="range-input">
+            </div>
+            <div class="form-group slider-group">
+              <label class="form-label">Contrast: <span id="contrast-val">100</span>%</label>
+              <input type="range" id="slider-contrast" min="50" max="150" value="100" class="range-input">
+            </div>
+            <div class="form-group slider-group">
+              <label class="form-label">Saturation: <span id="saturation-val">100</span>%</label>
+              <input type="range" id="slider-saturation" min="0" max="200" value="100" class="range-input">
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 3: AI Background Removal -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">🪄 AI Background Removal</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <button class="btn-primary btn-block" id="btn-remove-bg" disabled style="margin-top:6px">Remove Background</button>
+            <button class="btn-secondary btn-block" id="btn-remove-bg-all" style="display:none; margin-top:6px">
+              Remove All Backgrounds (<span id="batch-count">0</span>)
+            </button>
+            <div class="ai-progress" id="ai-progress" style="display:none; margin-top:6px">
+              <div class="spinner"></div>
+              <span id="ai-status-text">Loading AI model…</span>
+              <span id="ai-pct"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 4: Background Color -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">🎨 Background Color</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="color-presets" id="color-presets" style="margin-top:6px">
+              <button class="color-swatch active" data-color="#ffffff" style="background:#ffffff;" title="White"></button>
+              <button class="color-swatch" data-color="#4a86c8" style="background:#4a86c8;" title="Passport Blue"></button>
+              <button class="color-swatch" data-color="#e63946" style="background:#e63946;" title="Red"></button>
+              <button class="color-swatch" data-color="#d4d4d4" style="background:#d4d4d4;" title="Light Gray"></button>
+              <button class="color-swatch" data-color="#111111" style="background:#111111;border-color:rgba(255,255,255,0.2);" title="Black"></button>
+              <button class="color-swatch color-swatch-custom" id="custom-swatch" title="Custom" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+            </div>
+            <div class="color-input-row" style="margin-top:8px">
+              <input type="color" id="bg-color-picker" value="#ffffff">
+              <input type="text" id="bg-color-hex" class="form-control hex-input" value="#ffffff" maxlength="7" placeholder="#ffffff">
+            </div>
+            <button class="btn-secondary btn-sm" id="btn-reset-bg" style="margin-top:8px;width:100%">Reset to Original</button>
+          </div>
+        </div>
+
+        <!-- Accordion 5: Photo Border -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">🔲 Photo Border</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="switch-row" style="margin: 6px 0">
+              <label class="switch-wrap">
+                <input type="checkbox" id="border-enabled">
+                <span class="switch-track"></span>
+              </label>
+              <label for="border-enabled" style="font-size:12px">Add Border</label>
+            </div>
+            <div id="border-controls" style="display:none">
+              <div class="form-group">
+                <label class="form-label">Width: <span id="border-width-val">0.5</span> mm</label>
+                <input type="range" id="border-width" min="0.2" max="5" value="0.5" step="0.1" class="range-input">
+              </div>
+              <div class="form-group" style="margin-top:8px">
+                <label class="form-label">Color</label>
+                <div class="color-row" style="margin-top:4px">
+                  <input type="color" id="border-color-picker" value="#000000">
+                  <span id="border-color-text" class="hex-display">#000000</span>
+                </div>
+              </div>
+              <div class="color-presets" id="border-color-presets" style="margin-top:6px">
+                <button class="color-swatch active" data-border-color="#000000" style="background:#000000;border-color:rgba(255,255,255,0.2)" title="Black" type="button"></button>
+                <button class="color-swatch" data-border-color="#ffffff" style="background:#ffffff" title="White" type="button"></button>
+                <button class="color-swatch" data-border-color="#888888" style="background:#888888" title="Gray" type="button"></button>
+                <button class="color-swatch" data-border-color="#4a86c8" style="background:#4a86c8" title="Blue" type="button"></button>
+                <button class="color-swatch" data-border-color="#e63946" style="background:#e63946" title="Red" type="button"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 6: Photo Size -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">📐 Photo Size</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="form-group">
+              <label class="form-label">Search / Select Preset</label>
+              <!-- Search bar for sizes -->
+              <input type="text" id="photo-size-search" class="form-control" placeholder="🔍 Search sizes (e.g. US, India)..." style="margin-bottom:8px">
+              <select id="photo-preset" class="form-control">
+                <option value="35x45">Passport India (35 × 45 mm)</option>
+                <option value="2x2">US Passport (2 × 2 inch)</option>
+                <option value="40x60">Visa Photo (40 × 60 mm)</option>
+                <option value="aadhaar">Aadhaar Card (35 × 45 mm)</option>
+                <option value="pan">PAN Card (25 × 35 mm)</option>
+                <option value="driving">Driving Licence (35 × 45 mm)</option>
+                <option value="50x50">ID Card (50 × 50 mm)</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </div>
+            <div class="custom-dims" id="custom-photo-dims" style="display:none">
+              <div class="dims-row">
+                <div class="form-group">
+                  <label class="form-label">Width</label>
+                  <input type="number" id="photo-w" class="form-control" value="35" min="5" step="0.1">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Height</label>
+                  <input type="number" id="photo-h" class="form-control" value="45" min="5" step="0.1">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Unit</label>
+                  <select id="photo-unit" class="form-control">
+                    <option value="mm" selected>mm</option>
+                    <option value="cm">cm</option>
+                    <option value="in">inch</option>
+                    <option value="px">px</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="switch-row" style="margin-top:6px">
+              <label class="switch-wrap">
+                <input type="checkbox" id="lock-aspect" checked>
+                <span class="switch-track"></span>
+              </label>
+              <label for="lock-aspect" style="font-size:12px">Lock Aspect Ratio</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 7: Page Size -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">📄 Page Size</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="form-group">
+              <label class="form-label">Page Size Preset</label>
+              <select id="page-preset" class="form-control">
+                <option value="A3">A3 (297 × 420 mm)</option>
+                <option value="A4" selected>A4 (210 × 297 mm)</option>
+                <option value="A5">A5 (148 × 210 mm)</option>
+                <option value="Letter">Letter (8.5 × 11 in)</option>
+                <option value="Legal">Legal (8.5 × 14 in)</option>
+                <option value="4x6">4 × 6 inch</option>
+                <option value="5x7">5 × 7 inch</option>
+                <option value="8x10">8 × 10 inch</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </div>
+            <div class="custom-dims" id="custom-page-dims" style="display:none">
+              <div class="dims-row">
+                <div class="form-group">
+                  <label class="form-label">Width</label>
+                  <input type="number" id="page-w" class="form-control" value="210" min="50" step="0.1">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Height</label>
+                  <input type="number" id="page-h" class="form-control" value="297" min="50" step="0.1">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Unit</label>
+                  <select id="page-unit" class="form-control">
+                    <option value="mm" selected>mm</option>
+                    <option value="cm">cm</option>
+                    <option value="in">inch</option>
+                    <option value="px">px</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Orientation</label>
+              <div class="seg-control">
+                <button class="seg-btn active" id="btn-portrait" type="button">Portrait</button>
+                <button class="seg-btn" id="btn-landscape" type="button">Landscape</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Page Background</label>
+              <div class="color-row">
+                <input type="color" id="page-bg-picker" value="#ffffff">
+                <span id="page-bg-text" class="hex-display">#ffffff</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 8: Margins & Spacing -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">📏 Margins &amp; Spacing</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="form-group">
+              <label class="form-label">Margins (mm)</label>
+              <div class="margins-grid">
+                <input type="number" id="margin-t" class="form-control mini" value="10" min="0" max="50" title="Top">
+                <input type="number" id="margin-r" class="form-control mini" value="10" min="0" max="50" title="Right">
+                <input type="number" id="margin-b" class="form-control mini" value="10" min="0" max="50" title="Bottom">
+                <input type="number" id="margin-l" class="form-control mini" value="10" min="0" max="50" title="Left">
+              </div>
+              <div class="margins-labels"><span>Top</span><span>Right</span><span>Bottom</span><span>Left</span></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">H Spacing: <span id="spacing-h-val">3</span> mm</label>
+              <input type="range" id="spacing-h" min="0" max="20" value="3" step="0.5" class="range-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">V Spacing: <span id="spacing-v-val">3</span> mm</label>
+              <input type="range" id="spacing-v" min="0" max="20" value="3" step="0.5" class="range-input">
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 9: Layout Settings -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">⚙️ Layout Settings</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="form-group">
+              <label class="form-label">Arrangement Mode</label>
+              <div class="seg-control">
+                <button class="seg-btn active" id="btn-mode-auto" type="button">Auto Grid</button>
+                <button class="seg-btn" id="btn-mode-free" type="button">Free Move</button>
+              </div>
+            </div>
+
+            <div id="auto-controls">
+              <button class="btn-primary btn-block" id="btn-arrange" type="button">🎯 Auto Arrange Photos</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Accordion 10: Canvas Actions -->
+        <div class="editor-section expanded">
+          <button class="editor-section-header" type="button">
+            <span class="section-title">🎯 Canvas Actions</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div class="editor-section-content">
+            <div class="grid-actions-group" style="display:flex; flex-direction:column; gap:6px;">
+              <button class="btn-secondary btn-sm" id="btn-layout-center" type="button" style="width:100%">🎯 Center Selected Items</button>
+              <button class="btn-secondary btn-sm" id="btn-layout-duplicate" type="button" style="width:100%">➕ Duplicate Selected (Ctrl+D)</button>
+              <button class="btn-secondary danger btn-sm" id="btn-layout-delete" type="button" style="width:100%">🗑️ Delete Selected (Del)</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ─ Export Tab Panel (Hidden by default, shown when Print clicked) ─ -->
+    <div class="tab-panel" id="tab-export">
+      <div class="panel-header">
+        <h2 class="panel-title">Export &amp; Print</h2>
+      </div>
+
+      <div class="editor-scroll-container" style="padding:16px">
+        <div class="section-card" style="margin-top:0">
+          <div class="section-label">📁 File Name</div>
+          <input type="text" id="export-filename" class="form-control" value="passport-photos">
+        </div>
+
+        <div class="section-card">
+          <div class="section-label">🖨 Print Quality (DPI)</div>
+          <div class="radio-group">
+            <label class="radio-item">
+              <input type="radio" name="dpi" value="300" checked> 300 DPI — Standard Print
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="dpi" value="600"> 600 DPI — Premium Print <span class="badge-pro-inline" style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; margin-left: 6px; display: inline-block;">👑 Pro</span>
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="dpi" value="96"> 96 DPI — Screen Preview
+            </label>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-label">⬇️ Download</div>
+          <div class="export-grid">
+            <button class="btn-export" id="btn-png" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M14 2v6h6"/></svg>
+              PNG
+            </button>
+            <button class="btn-export" id="btn-jpg" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M14 2v6h6"/></svg>
+              JPG
+            </button>
+            <button class="btn-export" id="btn-pdf" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M14 2v6h6"/></svg>
+              PDF
+            </button>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-label">🖨 Print</div>
+          <button class="btn-primary btn-block" id="btn-print" type="button">
+            Print Layout Sheet
+          </button>
+          <p class="hint" style="margin-top:8px">In print dialog: set margins to <strong>None</strong> and enable <strong>Background graphics</strong></p>
+        </div>
+
+        <div class="section-card export-info-card">
+          <div class="section-label">📊 Export Info</div>
+          <div class="info-row"><span>Page:</span> <strong id="exp-page-size">A4 · 210×297 mm</strong></div>
+          <div class="info-row"><span>Photo:</span> <strong id="exp-photo-size">35×45 mm</strong></div>
+          <div class="info-row"><span>Resolution:</span> <strong id="exp-res">2480×3508 px</strong></div>
+          <div class="info-row"><span>Photos placed:</span> <strong id="exp-count">0</strong></div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── Main Workspace ────────────────────────────────────────────── -->
+  <main class="workspace" id="workspace">
+
+    <!-- Toolbar -->
+    <header class="toolbar" id="toolbar">
+      <div class="toolbar-left">
+        <button class="tbtn" id="btn-undo" title="Undo (Ctrl+Z)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:15px;height:15px"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        </button>
+        <button class="tbtn" id="btn-redo" title="Redo (Ctrl+Y)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:15px;height:15px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
+        <div class="tbtn-sep"></div>
+        <div class="item-toolbar" id="item-toolbar" style="display:none">
+          <button class="tbtn danger" id="btn-delete-item" title="Delete Selected (Del)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="toolbar-center">
+        <span class="doc-title">Print Layout</span>
+      </div>
+
+      <div class="toolbar-right">
+        <button class="tbtn" id="btn-zoom-out" title="Zoom Out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:13px;height:13px"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <span class="zoom-display" id="zoom-display">100%</span>
+        <button class="tbtn" id="btn-zoom-in" title="Zoom In">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="tbtn-text" id="btn-zoom-fit">Fit</button>
+        <button class="tbtn-text" id="btn-zoom-100">100%</button>
+        <button class="tbtn" id="btn-toggle-theme" title="Toggle Theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px" id="theme-btn-icon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Canvas Area -->
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas-scaler" id="canvas-scaler">
+        <div class="page" id="page">
+          <div class="margins-guide" id="margins-guide"></div>
+          <div class="items-layer" id="items-layer">
+            <div class="canvas-placeholder" id="canvas-placeholder">
+              Upload photos and click <strong>Auto Arrange</strong>
+            </div>
+          </div>
+          <div class="guides-layer" id="guides-layer"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="ctx-menu" id="ctx-menu" style="display:none">
+      <button class="ctx-item" id="ctx-delete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+        Delete Photo
+      </button>
+      <button class="ctx-item" id="ctx-duplicate">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        Duplicate
+      </button>
+    </div>
+
+    <!-- Status Bar -->
+    <footer class="statusbar">
+      <span class="stat"><span class="stat-label">Page:</span> <strong id="info-page">A4 · 210×297 mm</strong></span>
+      <span class="stat"><span class="stat-label">Photo:</span> <strong id="info-photo">35×45 mm</strong></span>
+      <span class="stat"><span class="stat-label">Placed:</span> <strong id="info-count">0 photos</strong></span>
+      <span class="stat"><span class="stat-label">Usage:</span> <strong id="info-usage">0%</strong></span>
+      <span class="stat"><span class="stat-label">Quality:</span> <strong id="info-quality">⭐ 300 DPI</strong></span>
+    </footer>
+  </main>
+
+  <!-- Right Properties Panel -->
+  <aside class="properties-panel" id="properties-panel">
+    <div class="panel-header">
+      <h2 class="panel-title">Properties</h2>
+    </div>
+    <div class="properties-body">
+      <div id="no-selection-properties" class="properties-placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:24px;height:24px;margin-bottom:8px;color:var(--text-muted);"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+        <p>Select a photo on the sheet to view properties</p>
+      </div>
+      <div id="active-properties" style="display:none">
+        <div class="prop-group">
+          <label class="prop-label">Dimensions</label>
+          <div class="prop-row">
+            <div class="prop-col">
+              <span class="prop-sublabel">W (Width)</span>
+              <span class="prop-val-box" id="prop-w">--</span>
+            </div>
+            <div class="prop-col">
+              <span class="prop-sublabel">H (Height)</span>
+              <span class="prop-val-box" id="prop-h">--</span>
+            </div>
+          </div>
+        </div>
+        <div class="prop-group">
+          <label class="prop-label">Position</label>
+          <div class="prop-row">
+            <div class="prop-col">
+              <span class="prop-sublabel">X Coordinate</span>
+              <span class="prop-val-box" id="prop-x">--</span>
+            </div>
+            <div class="prop-col">
+              <span class="prop-sublabel">Y Coordinate</span>
+              <span class="prop-val-box" id="prop-y">--</span>
+            </div>
+          </div>
+        </div>
+        <div class="prop-group">
+          <label class="prop-label">Transform</label>
+          <div class="prop-row">
+            <div class="prop-col">
+              <span class="prop-sublabel">Rotation</span>
+              <span class="prop-val-box" id="prop-rotation">0°</span>
+            </div>
+            <div class="prop-col">
+              <span class="prop-sublabel">Relative Scale</span>
+              <span class="prop-val-box" id="prop-scale">1.00</span>
+            </div>
+          </div>
+        </div>
+        <div class="prop-group">
+          <label class="prop-label">Status</label>
+          <div class="prop-col">
+            <span class="prop-sublabel">Background Status</span>
+            <span class="prop-val-box status-badge" id="prop-bg-status">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+</div><!-- /app -->
+
+
+<!-- ── Crop Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="crop-modal" style="display:none">
+  <div class="modal-card crop-modal-card">
+    <div class="modal-header">
+      <h3>Crop &amp; Adjust Photo</h3>
+      <button class="modal-close" id="btn-crop-close">&times;</button>
+    </div>
+    <div class="crop-container" id="crop-container">
+      <img id="crop-img" src="" alt="Crop preview">
+    </div>
+    <div class="crop-toolbar">
+      <button class="crop-tbtn" id="btn-cundo" title="Undo last action" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:16px;height:16px"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+        Undo
+      </button>
+      <button class="crop-tbtn" id="btn-crot-l" title="Rotate Left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:16px;height:16px"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        Rotate L
+      </button>
+      <button class="crop-tbtn" id="btn-crot-r" title="Rotate Right">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:16px;height:16px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Rotate R
+      </button>
+      <button class="crop-tbtn" id="btn-cflip-h" title="Flip Horizontal">↔ Flip H</button>
+      <button class="crop-tbtn" id="btn-cflip-v" title="Flip Vertical">↕ Flip V</button>
+      <button class="crop-tbtn" id="btn-czoom-in" title="Zoom In">🔍+</button>
+      <button class="crop-tbtn" id="btn-czoom-out" title="Zoom Out">🔍−</button>
+      <button class="crop-tbtn" id="btn-creset" title="Reset">↺ Reset</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="btn-crop-cancel">Cancel</button>
+      <button class="btn-primary" id="btn-crop-apply">Apply Crop</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Authentication Modal ────────────────────────────────────────── -->
+<div class="modal-overlay" id="auth-modal" style="display:none">
+  <!-- Login Card -->
+  <div class="modal-card auth-card" id="auth-login-card" style="display:none">
+    <div class="modal-header">
+      <h3>Sign In</h3>
+      <button class="modal-close auth-close-btn">&times;</button>
+    </div>
+    <form class="auth-form" id="form-login">
+      <div class="form-group">
+        <label class="form-label" for="login-email">Email Address</label>
+        <input type="email" id="login-email" class="form-control" placeholder="you@example.com" required>
+      </div>
+      <div class="form-group">
+        <div class="form-label-row" style="display:flex; justify-content:space-between; align-items:center;">
+          <label class="form-label" for="login-password">Password</label>
+          <a href="#" class="link-btn" id="link-forgot-password" style="font-size:12px; color:var(--brand); text-decoration:none;">Forgot?</a>
+        </div>
+        <input type="password" id="login-password" class="form-control" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn-primary btn-block">Sign In</button>
+    </form>
+    
+    <div class="auth-divider"><span>or</span></div>
+    
+    <button class="btn-secondary btn-block btn-google-auth" id="btn-google-login" type="button">
+      <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right:8px; vertical-align:middle;"><path fill="#EA4335" d="M12 5.04c1.7 0 3.23.59 4.43 1.73l3.31-3.3C17.76 1.47 15.11 0 12 0 7.35 0 3.37 2.67 1.45 6.57l3.9 3.03c.92-2.76 3.5-4.56 6.65-4.56z"/><path fill="#4285F4" d="M23.49 12.27c0-.82-.07-1.6-.2-2.36H12v4.51h6.44c-.28 1.47-1.11 2.71-2.36 3.55l3.66 2.84c2.14-1.97 3.39-4.88 3.39-8.54z"/><path fill="#FBBC05" d="M5.35 14.86c-.24-.73-.38-1.5-.38-2.3s.14-1.57.38-2.3L1.45 7.23C.52 9.09 0 11.18 0 13.36s.52 4.27 1.45 6.13l3.9-3.63z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.66-2.84c-1.01.68-2.31 1.09-4.27 1.09-3.15 0-5.73-1.8-6.65-4.56L1.45 17.8C3.37 21.7 7.35 24 12 24z"/></svg>
+      Continue with Google
+    </button>
+    
+    <div class="auth-footer-text">
+      Don't have an account? <a href="#" id="link-signup">Create one</a>
+    </div>
+  </div>
+
+  <!-- Sign Up Card -->
+  <div class="modal-card auth-card" id="auth-signup-card" style="display:none">
+    <div class="modal-header">
+      <h3>Create Account</h3>
+      <button class="modal-close auth-close-btn">&times;</button>
+    </div>
+    <form class="auth-form" id="form-signup">
+      <div class="form-group">
+        <label class="form-label" for="signup-name">Full Name</label>
+        <input type="text" id="signup-name" class="form-control" placeholder="John Doe" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="signup-email">Email Address</label>
+        <input type="email" id="signup-email" class="form-control" placeholder="you@example.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="signup-password">Password</label>
+        <input type="password" id="signup-password" class="form-control" placeholder="At least 6 characters" minlength="6" required>
+      </div>
+      <button type="submit" class="btn-primary btn-block">Sign Up</button>
+    </form>
+    <div class="auth-footer-text">
+      Already have an account? <a href="#" id="link-login">Sign In</a>
+    </div>
+  </div>
+
+  <!-- Forgot Password Card -->
+  <div class="modal-card auth-card" id="auth-forgot-card" style="display:none">
+    <div class="modal-header">
+      <h3>Forgot Password</h3>
+      <button class="modal-close auth-close-btn">&times;</button>
+    </div>
+    <p class="auth-hint">Enter your email and we'll send you a link to reset your password.</p>
+    <form class="auth-form" id="form-forgot">
+      <div class="form-group">
+        <label class="form-label" for="forgot-email">Email Address</label>
+        <input type="email" id="forgot-email" class="form-control" placeholder="you@example.com" required>
+      </div>
+      <button type="submit" class="btn-primary btn-block">Send Reset Link</button>
+    </form>
+    <div class="auth-footer-text">
+      <a href="#" id="link-forgot-to-login">Back to Sign In</a>
+    </div>
+  </div>
+
+  <!-- Reset Password Card -->
+  <div class="modal-card auth-card" id="auth-reset-card" style="display:none">
+    <div class="modal-header">
+      <h3>Reset Password</h3>
+      <button class="modal-close auth-close-btn">&times;</button>
+    </div>
+    <form class="auth-form" id="form-reset">
+      <div class="form-group">
+        <label class="form-label" for="reset-password-input">New Password</label>
+        <input type="password" id="reset-password-input" class="form-control" placeholder="At least 6 characters" minlength="6" required>
+      </div>
+      <button type="submit" class="btn-primary btn-block">Update Password</button>
+    </form>
+  </div>
+
+  <!-- Simulated Google Pop-up Card -->
+  <div class="modal-card auth-card" id="google-sim-card" style="display:none">
+    <div class="modal-header">
+      <h3>Google Sign-In (Simulation)</h3>
+      <button class="modal-close" id="btn-google-sim-close">&times;</button>
+    </div>
+    <p class="auth-hint">Select a mock Google account to log in instantly:</p>
+    <div class="google-profiles-list">
+      <button class="google-profile-btn" type="button" data-name="Alice Smith" data-email="alice.smith@gmail.com" data-id="1092837492">
+        <span class="g-avatar">A</span>
+        <div class="g-info">
+          <strong>Alice Smith</strong>
+          <span>alice.smith@gmail.com</span>
+        </div>
+      </button>
+      <button class="google-profile-btn" type="button" data-name="Bob Johnson" data-email="bob.johnson@gmail.com" data-id="1029384756">
+        <span class="g-avatar">B</span>
+        <div class="g-info">
+          <strong>Bob Johnson</strong>
+          <span>bob.johnson@gmail.com</span>
+        </div>
+      </button>
+      <button class="google-profile-btn" type="button" data-name="Guest Developer" data-email="dev.guest@gmail.com" data-id="1928374650">
+        <span class="g-avatar">D</span>
+        <div class="g-info">
+          <strong>Guest Developer</strong>
+          <span>dev.guest@gmail.com</span>
+        </div>
+      </button>
+    </div>
+    <div class="auth-divider"><span>or custom profile</span></div>
+    <form class="auth-form" id="form-google-custom">
+      <div class="form-group">
+        <label class="form-label" for="g-custom-name">Full Name</label>
+        <input type="text" id="g-custom-name" class="form-control" placeholder="Your Name" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="g-custom-email">Email Address</label>
+        <input type="email" id="g-custom-email" class="form-control" placeholder="your.email@gmail.com" required>
+      </div>
+      <button type="submit" class="btn-brand btn-block">Sign In with Custom Profile</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Account & Security Settings Modal ────────────────────────────── -->
+<div class="modal-overlay" id="settings-modal" style="display:none">
+  <div class="modal-card settings-card">
+    <div class="modal-header">
+      <h3>Account &amp; Security Settings</h3>
+      <button class="modal-close" id="btn-settings-close">&times;</button>
+    </div>
+    <div class="settings-body">
+      <!-- Settings Tabs -->
+      <div class="settings-tabs">
+        <button class="set-tab active" data-stab="profile">👤 Profile</button>
+        <button class="set-tab" data-stab="security">🔒 Security</button>
+        <button class="set-tab" data-stab="subscription">👑 Subscription</button>
+        <button class="set-tab danger" data-stab="delete-zone">⚠️ Danger Zone</button>
+      </div>
+      <!-- Settings Content -->
+      <div class="settings-content">
+        
+        <!-- Profile Tab -->
+        <div class="set-panel active" id="set-panel-profile">
+          <h4>Update Profile Information</h4>
+          <form class="settings-form" id="form-update-profile">
+            <div class="form-group">
+              <label class="form-label" for="profile-name">Full Name</label>
+              <input type="text" id="profile-name" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="profile-email">Email Address</label>
+              <input type="email" id="profile-email" class="form-control" required>
+            </div>
+            <button type="submit" class="btn-primary">Save Changes</button>
+          </form>
+        </div>
+
+        <!-- Security Tab -->
+        <div class="set-panel" id="set-panel-security">
+          <h4>Change Account Password</h4>
+          <p class="settings-hint">Requires entering your current password for security verification.</p>
+          <form class="settings-form" id="form-change-password">
+            <div class="form-group">
+              <label class="form-label" for="sec-current-password">Current Password</label>
+              <input type="password" id="sec-current-password" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="sec-new-password">New Password</label>
+              <input type="password" id="sec-new-password" class="form-control" placeholder="At least 6 characters" minlength="6" required>
+            </div>
+            <button type="submit" class="btn-primary">Update Password</button>
+          </form>
+        </div>
+
+        <!-- Subscription Tab -->
+        <div class="set-panel" id="set-panel-subscription">
+          <h4>Membership & Plans</h4>
+
+          <!-- Trial Banner (shown dynamically) -->
+          <div class="trial-banner" id="trial-banner" style="display:none">
+            <div class="trial-banner-icon">🎉</div>
+            <div class="trial-banner-text">
+              <strong>Free Trial Active</strong>
+              <span id="trial-days-left">7 days remaining</span>
+            </div>
+          </div>
+
+          <!-- Current Plan Info -->
+          <div class="current-plan-card" id="current-plan-card">
+            <div class="plan-header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <div>
+                <span class="plan-label" style="font-size:10px; color:var(--text-muted); font-weight:600; text-transform:uppercase;">CURRENT PLAN</span>
+                <h3 class="plan-title" id="settings-plan-name" style="margin:0; font-size:18px;">Free Plan</h3>
+              </div>
+              <div class="plan-badge-wrap">
+                <span class="badge badge-free" id="settings-plan-badge">Free</span>
+              </div>
+            </div>
+            <div id="plan-expiry-info" style="font-size:12px; color:var(--text-muted); margin-bottom:12px;"></div>
+          </div>
+
+          <!-- Pricing Cards Grid -->
+          <div class="pricing-section-title" style="font-size:13px; font-weight:600; color:var(--text); margin:16px 0 10px; text-transform:uppercase; letter-spacing:0.5px;">Choose a Plan</div>
+          <div class="pricing-grid" id="pricing-grid">
+
+            <!-- Free Trial Card -->
+            <div class="pricing-card trial-card" id="trial-card">
+              <div class="pricing-card-badge trial-badge">Free</div>
+              <h4 class="pricing-card-name">7-Day Trial</h4>
+              <div class="pricing-card-price">
+                <span class="price-amount">₹0</span>
+              </div>
+              <p class="pricing-card-desc">Try all Pro features free for 7 days</p>
+              <ul class="pricing-features">
+                <li>✓ 600 DPI Print Quality</li>
+                <li>✓ Unlimited Photos</li>
+                <li>✓ All Formats</li>
+              </ul>
+              <button class="btn-pricing btn-trial" id="btn-start-trial" type="button">Start Free Trial</button>
+            </div>
+
+            <!-- Monthly -->
+            <div class="pricing-card" data-plan="monthly">
+              <h4 class="pricing-card-name">Monthly</h4>
+              <div class="pricing-card-price">
+                <span class="price-amount">₹99</span>
+                <span class="price-period">/month</span>
+              </div>
+              <p class="pricing-card-desc">Perfect for occasional use</p>
+              <ul class="pricing-features">
+                <li>✓ 600 DPI Print Quality</li>
+                <li>✓ Unlimited Photos</li>
+                <li>✓ 30 Days Access</li>
+              </ul>
+              <button class="btn-pricing btn-buy" data-plan="monthly" type="button">Buy Monthly</button>
+            </div>
+
+            <!-- 6 Months -->
+            <div class="pricing-card" data-plan="6months">
+              <div class="pricing-card-badge save-badge">Save 16%</div>
+              <h4 class="pricing-card-name">6 Months</h4>
+              <div class="pricing-card-price">
+                <span class="price-amount">₹499</span>
+                <span class="price-period">/ 6 months</span>
+              </div>
+              <p class="pricing-card-desc">₹83/mo — Great value</p>
+              <ul class="pricing-features">
+                <li>✓ 600 DPI Print Quality</li>
+                <li>✓ Unlimited Photos</li>
+                <li>✓ 180 Days Access</li>
+              </ul>
+              <button class="btn-pricing btn-buy" data-plan="6months" type="button">Buy 6 Months</button>
+            </div>
+
+            <!-- Yearly (Popular) -->
+            <div class="pricing-card popular" data-plan="yearly">
+              <div class="pricing-card-badge popular-badge">Most Popular</div>
+              <h4 class="pricing-card-name">Yearly</h4>
+              <div class="pricing-card-price">
+                <span class="price-amount">₹999</span>
+                <span class="price-period">/year</span>
+              </div>
+              <p class="pricing-card-desc">₹83/mo — Best for regular use</p>
+              <ul class="pricing-features">
+                <li>✓ 600 DPI Print Quality</li>
+                <li>✓ Unlimited Photos</li>
+                <li>✓ 365 Days Access</li>
+              </ul>
+              <button class="btn-pricing btn-buy btn-popular" data-plan="yearly" type="button">Buy Yearly</button>
+            </div>
+
+            <!-- Lifetime -->
+            <div class="pricing-card" data-plan="lifetime">
+              <div class="pricing-card-badge lifetime-badge">Forever</div>
+              <h4 class="pricing-card-name">Lifetime</h4>
+              <div class="pricing-card-price">
+                <span class="price-amount">₹2999</span>
+                <span class="price-period">one-time</span>
+              </div>
+              <p class="pricing-card-desc">Pay once, use forever</p>
+              <ul class="pricing-features">
+                <li>✓ 600 DPI Print Quality</li>
+                <li>✓ Unlimited Photos</li>
+                <li>✓ Lifetime Access</li>
+                <li>✓ All Future Updates</li>
+              </ul>
+              <button class="btn-pricing btn-buy" data-plan="lifetime" type="button">Buy Lifetime</button>
+            </div>
+
+          </div>
+
+          <!-- Payment History -->
+          <div class="payment-history-section" id="payment-history-section" style="display:none; margin-top:20px;">
+            <h4 style="font-size:14px; margin-bottom:10px; color:var(--text);">💳 Payment History</h4>
+            <div class="payment-history-list" id="payment-history-list"></div>
+          </div>
+
+        </div>
+
+        <!-- Danger Zone Tab -->
+        <div class="set-panel" id="set-panel-delete-zone">
+          <h4 class="danger-title" style="color:var(--danger);">Delete Account Permanently</h4>
+          <p class="settings-hint danger-hint" style="color:var(--danger); opacity:0.8;">This action is irreversible. All your profile data, session tokens, and database records will be permanently removed.</p>
+          <form class="settings-form" id="form-delete-account">
+            <div class="form-group" id="delete-pwd-group">
+              <label class="form-label" for="delete-password">Confirm Password</label>
+              <input type="password" id="delete-password" class="form-control" placeholder="Enter password to confirm account deletion" required>
+            </div>
+            <button type="submit" class="btn-primary danger btn-block">I understand, delete my account</button>
+          </form>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast Notifications ──────────────────────────────────────── -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- Print Sheet (hidden, shown only via @media print) -->
+<div id="print-sheet"></div>
+
+<!-- Libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js" crossorigin="anonymous"></script>
+<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

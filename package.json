@@ -1,0 +1,17 @@
+{
+  "name": "passport-size-photo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@imgly/background-removal": "^1.4.5",
+    "@imgly/background-removal-data": "^1.4.5"
+  }
+}
