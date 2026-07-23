@@ -17,7 +17,7 @@ import hmac
 import base64
 
 PORT = int(os.environ.get('PORT', 8000))
-DB_FILE = 'users.db'
+DB_FILE = os.environ.get('DB_FILE', 'users.db')
 
 # Security: max request body size for auth endpoints (10 KB)
 MAX_AUTH_BODY_SIZE = 10 * 1024  # 10 KB

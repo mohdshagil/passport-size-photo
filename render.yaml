@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: passport-size-photo-maker
+    runtime: python
+    buildCommand: ""
+    startCommand: python server.py
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: CASHFREE_ENV
+        value: sandbox
+      - key: CASHFREE_CLIENT_ID
+        sync: false
+      - key: CASHFREE_CLIENT_SECRET
+        sync: false
