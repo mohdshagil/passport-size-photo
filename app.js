@@ -301,10 +301,8 @@ QA('.stab[data-tab]').forEach(btn => {
 });
 
 
-// ─── THEME TOGGLE ─────────────────────────────────────────────────────────────
-btnToggleTheme.addEventListener('click', () => {
-  document.body.classList.toggle('dark');
-});
+// Ensure light mode is active
+document.body.classList.remove('dark');
 
 
 // ─── PHOTO UPLOAD ─────────────────────────────────────────────────────────────
@@ -376,12 +374,24 @@ function deletePhoto(id) {
   state.photos      = state.photos.filter(p => p.id !== id);
   state.items       = state.items.filter(it => it.photoId !== id);
   state.selected    = state.selected.filter(s => state.items.some(it => it.id === s));
+  state.selectedPhotoIds.delete(id);
   if (state.activePhotoId === id) {
     state.activePhotoId = state.photos[0]?.id ?? null;
   }
+  if (state.photos.length > 0) {
+    if (state.mode === 'auto') {
+      autoArrange();
+    } else {
+      reflowItems();
+      renderCanvas();
+    }
+  } else {
+    state.items = [];
+    renderCanvas();
+  }
   renderPhotoGrid();
   updateSelectedCard();
-  renderCanvas();
+  renderCopiesList();
   snap();
 }
 
@@ -759,22 +769,32 @@ async function removeBg(photo) {
   aiStatusText.textContent = 'Removing background…';
   aiPct.textContent = '';
 
-  try {
-    // The library accepts Blob, URL, ImageData, or data URL
+  const runModel = async (modelName) => {
     const inputBlob = dataUrlToBlob(photo.src);
-    const resultBlob = await _imglyRemoveBg(inputBlob, {
+    return await _imglyRemoveBg(inputBlob, {
       publicPath: window.location.origin + '/lib/imgly/',
-      model: 'medium',
+      model: modelName,
       output: { format: 'image/png', quality: 1.0 },
       progress: (key, current, total) => {
         if (key === 'compute:inference') {
-          aiStatusText.textContent = 'AI is processing…';
+          aiStatusText.textContent = 'AI is processing cutout…';
         } else if (key === 'fetch:model') {
-          aiStatusText.textContent = 'Loading AI model (medium quality)…';
+          aiStatusText.textContent = `Loading local AI model (${modelName} quality)…`;
           if (total > 0) aiPct.textContent = `(${Math.round((current / total) * 100)}%)`;
         }
       }
     });
+  };
+
+  try {
+    let resultBlob;
+    try {
+      resultBlob = await runModel('medium');
+    } catch (mediumErr) {
+      console.warn('Medium model failed, falling back to small model:', mediumErr);
+      aiStatusText.textContent = 'Retrying with lightweight model…';
+      resultBlob = await runModel('small');
+    }
 
     // Convert result Blob to data URL to maintain compatibility with rest of app
     const resultUrl = await new Promise((resolve, reject) => {
@@ -787,15 +807,16 @@ async function removeBg(photo) {
     photo.src   = resultUrl;
     photo.hasBg = true;
   } catch (err) {
-    const msg = err?.message || '';
-    if (msg.includes('fetch') || msg.includes('network')) {
-      throw new Error('Unable to download AI model. Check your internet connection.');
-    }
+    console.error('Background removal error:', err);
+    const msg = err?.message || String(err) || '';
     if (msg.includes('memory') || msg.includes('OOM') || msg.includes('allocation')) {
-      throw new Error('Out of memory. Try a smaller image or close other tabs.');
+      throw new Error('Out of memory. Try a smaller photo resolution or close unused browser tabs.');
     }
     if (msg.includes('corrupt') || msg.includes('decode') || msg.includes('invalid image')) {
-      throw new Error('Image appears to be corrupted. Please try a different photo.');
+      throw new Error('Image format not supported or corrupted. Please try a different photo.');
+    }
+    if (msg.includes('fetch') || msg.includes('network') || msg.includes('ERR_')) {
+      throw new Error('Unable to read local AI model files. Please refresh the page and try again.');
     }
     throw new Error('Background removal failed: ' + (msg || 'Unknown error. Please try again.'));
   }
@@ -1236,11 +1257,6 @@ function autoArrange() {
   const startY = M.t + Math.max(0, (availH - gridH) / 2);
 
   let maxSlots = cols * rows;
-  const isPro = state.user && state.user.plan === 'Pro';
-  if (!isPro && maxSlots > 6) {
-    maxSlots = 6;
-    toast('Free plan is limited to 6 photos per sheet. Upgrade to Pro for unlimited!', 'info', 4000);
-  }
   const newItems = [];
 
   const numPhotos = state.photos.length;
@@ -1743,7 +1759,10 @@ btnDeleteItem.addEventListener('click', deleteSelectedItems);
 function deleteSelectedItems() {
   state.items    = state.items.filter(it => !state.selected.includes(it.id));
   state.selected = [];
-  renderCanvas(); snap();
+  reflowItems();
+  renderCanvas();
+  renderCopiesList();
+  snap();
 }
 
 function duplicateSelected() {
@@ -1967,896 +1986,653 @@ function syncControls() {
 }
 
 
-// ─── AUTH & SECURITY MANAGEMENT ──────────────────────────────────────────────
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-}
+// ─── AUTH SYSTEM ──────────────────────────────────────────────────────────────
 
-async function apiCall(url, method = 'GET', body = null) {
-  const opts = {
-    method,
-    headers: {
-      'Content-Type': 'application/json'
-    }
-  };
-  if (body) {
-    opts.body = JSON.stringify(body);
-  }
-  try {
-    const resp = await fetch(url, opts);
-    const text = await resp.text();
-    let data = {};
-    if (text) {
-      try { data = JSON.parse(text); } catch (e) { console.error('JSON parse error:', e); }
-    }
-    if (!resp.ok) {
-      const errMsg = data.errors?.[0]?.title || `Request failed with status ${resp.status}`;
-      if (data.verifyLink) {
-        showSimulationToast('Verification Link (Simulated)', data.verifyLink);
-      }
-      if (data.resetLink) {
-        showSimulationToast('Reset Password Link (Simulated)', data.resetLink);
-      }
-      throw new Error(errMsg);
-    }
-    if (data.verifyLink) {
-      showSimulationToast('Verification Link (Simulated)', data.verifyLink);
-    }
-    if (data.resetLink) {
-      showSimulationToast('Reset Password Link (Simulated)', data.resetLink);
-    }
-    return data;
-  } catch (err) {
-    console.error(`API Error for ${url}:`, err);
-    throw err;
-  }
-}
+// Simulated Google accounts for local dev
+const MOCK_GOOGLE_ACCOUNTS = [
+  { name: 'Test User', email: 'testuser@gmail.com' },
+  { name: 'Demo Dev',  email: 'demo.dev@gmail.com' }
+];
 
-function showSimulationToast(title, url) {
-  const container = $('toast-container');
-  if (!container) return;
-  const toastEl = document.createElement('div');
-  toastEl.className = 'toast info';
-  toastEl.style.maxWidth = '400px';
-  toastEl.style.flexDirection = 'column';
-  toastEl.style.alignItems = 'flex-start';
-  toastEl.style.gap = '6px';
-  toastEl.innerHTML = `
-    <div style="font-weight:700; color:var(--brand); display:flex; align-items:center; gap:6px;">
-      <span>✉️ Local Mail Simulation</span>
-    </div>
-    <div style="font-size:12px; color:var(--text); line-height:1.4;">
-      ${title}: <a href="${url}" target="_blank" style="color:var(--brand); font-weight:600; text-decoration:underline;">Click to run flow</a>
-    </div>
-  `;
-  container.appendChild(toastEl);
-  setTimeout(() => toastEl.remove(), 15000);
-}
+// Helper: show/hide element
+function authShow(el) { if (el) el.style.display = ''; }
+function authHide(el) { if (el) el.style.display = 'none'; }
 
-function renderUserAccountBar() {
-  const bar = $('user-account-bar');
-  if (!bar) return;
-  if (!state.user) {
-    bar.innerHTML = `
-      <div class="account-logged-out">
-        <div class="promo-text">🔑 Sign in to unlock Pro features like 600 DPI printing and unlimited copies!</div>
-        <button class="btn-brand btn-sm" id="btn-login-trigger" type="button" style="width:100%">Sign In / Register</button>
-      </div>
-    `;
-    $('btn-login-trigger').addEventListener('click', () => showAuthModal('login'));
-  } else {
-    const isPro = state.user.plan === 'Pro';
-    bar.innerHTML = `
-      <div class="account-logged-in">
-        <div class="user-info" id="user-profile-trigger" title="Account Settings">
-          <div class="user-avatar">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          </div>
-          <div class="user-details">
-            <span class="user-name">${escapeHtml(state.user.name)}</span>
-            <span class="badge ${isPro ? 'badge-pro' : 'badge-free'}">${isPro ? '👑 Pro' : 'Free'}</span>
-          </div>
-        </div>
-        <div class="account-actions">
-          <button class="btn-icon" id="btn-settings-trigger" title="Settings & Security" type="button">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
-          <button class="btn-icon" id="btn-logout" title="Sign Out" type="button">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          </button>
-        </div>
-      </div>
-    `;
-    $('user-profile-trigger').addEventListener('click', () => showSettingsModal());
-    $('btn-settings-trigger').addEventListener('click', () => showSettingsModal());
-    $('btn-logout').addEventListener('click', handleLogout);
-  }
-}
-
-const authModal = $('auth-modal');
-const authCards = ['auth-login-card', 'auth-signup-card', 'auth-forgot-card', 'auth-reset-card', 'google-sim-card'];
-
-function showAuthModal(view) {
-  authModal.style.display = 'flex';
-  authCards.forEach(c => $(c).style.display = 'none');
-  if (view === 'login') $('auth-login-card').style.display = 'block';
-  else if (view === 'signup') $('auth-signup-card').style.display = 'block';
-  else if (view === 'forgot') $('auth-forgot-card').style.display = 'block';
-  else if (view === 'reset') $('auth-reset-card').style.display = 'block';
-  else if (view === 'google-sim') $('google-sim-card').style.display = 'block';
-}
-
-function closeAuthModal() {
-  authModal.style.display = 'none';
-}
-
-QA('.auth-close-btn').forEach(btn => btn.addEventListener('click', closeAuthModal));
-$('link-signup').addEventListener('click', (e) => { e.preventDefault(); showAuthModal('signup'); });
-$('link-login').addEventListener('click', (e) => { e.preventDefault(); showAuthModal('login'); });
-$('link-forgot-password').addEventListener('click', (e) => { e.preventDefault(); showAuthModal('forgot'); });
-$('link-forgot-to-login').addEventListener('click', (e) => { e.preventDefault(); showAuthModal('login'); });
-$('btn-google-login').addEventListener('click', () => showAuthModal('google-sim'));
-$('btn-google-sim-close').addEventListener('click', () => showAuthModal('login'));
-
-// Google Sim profiles button event listeners
-QA('.google-profile-btn').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    const name = btn.dataset.name;
-    const email = btn.dataset.email;
-    const googleId = btn.dataset.id;
-    try {
-      const res = await apiCall('/api/auth/google-login', 'POST', { name, email, googleId });
-      state.user = res.user;
-      renderUserAccountBar();
-      applyFeatureLimits();
-      closeAuthModal();
-      toast(`Logged in as ${res.user.name} (Google)`, 'success');
-      if (state.mode === 'auto') autoArrange();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  });
-});
-
-$('form-google-custom').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const name = $('g-custom-name').value;
-  const email = $('g-custom-email').value;
-  const googleId = 'custom-' + Date.now();
-  try {
-    const res = await apiCall('/api/auth/google-login', 'POST', { name, email, googleId });
-    state.user = res.user;
-    renderUserAccountBar();
-    applyFeatureLimits();
-    closeAuthModal();
-    toast(`Logged in as ${res.user.name} (Google Custom)`, 'success');
-    if (state.mode === 'auto') autoArrange();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-$('form-signup').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const name = $('signup-name').value;
-  const email = $('signup-email').value;
-  const password = $('signup-password').value;
-  try {
-    const res = await apiCall('/api/auth/signup', 'POST', { name, email, password });
-    toast(res.message || 'Signup successful. Please verify email.', 'success');
-    $('form-signup').reset();
-    showAuthModal('login');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-$('form-login').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const email = $('login-email').value;
-  const password = $('login-password').value;
-  try {
-    const res = await apiCall('/api/auth/login', 'POST', { email, password });
-    state.user = res.user;
-    renderUserAccountBar();
-    applyFeatureLimits();
-    closeAuthModal();
-    toast(`Welcome back, ${res.user.name}!`, 'success');
-    if (state.mode === 'auto') autoArrange();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-async function handleLogout() {
-  try {
-    await apiCall('/api/auth/logout', 'POST');
-    state.user = null;
-    renderUserAccountBar();
-    applyFeatureLimits();
-    toast('Logged out successfully.', 'info');
-    if (state.mode === 'auto') autoArrange();
-  } catch (err) {
-    toast('Logout failed.', 'error');
-  }
-}
-
-$('form-forgot').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const email = $('forgot-email').value;
-  try {
-    const res = await apiCall('/api/auth/forgot-password', 'POST', { email });
-    toast(res.message || 'Reset link generated.', 'success');
-    $('form-forgot').reset();
-    showAuthModal('login');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-$('form-reset').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const password = $('reset-password-input').value;
-  const match = window.location.hash.match(/token=([0-9a-f]{64})/);
-  if (!match) {
-    toast('Missing or invalid reset token in URL.', 'error');
-    return;
-  }
-  const token = match[1];
-  try {
-    const res = await apiCall('/api/auth/reset-password', 'POST', { token, password });
-    toast(res.message || 'Password reset successfully.', 'success');
-    $('form-reset').reset();
-    window.location.hash = '';
-    showAuthModal('login');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-// Settings Dialog management
-const settingsModal = $('settings-modal');
-function showSettingsModal(tab = 'profile') {
-  if (!state.user) {
-    showAuthModal('login');
-    return;
-  }
-  settingsModal.style.display = 'flex';
-  $('profile-name').value = state.user.name;
-  $('profile-email').value = state.user.email;
-  $('form-change-password').reset();
-  $('form-delete-account').reset();
-  
-  updateSubscriptionUI();
-  
-  if (state.user.provider === 'google') {
-    $('delete-pwd-group').style.display = 'none';
-    $('delete-password').required = false;
-  } else {
-    $('delete-pwd-group').style.display = 'block';
-    $('delete-password').required = true;
-  }
-  switchSettingsTab(tab);
-}
-
-function updateSubscriptionUI() {
-  if (!state.user) return;
-  
-  const isPro = state.user.plan === 'Pro';
-  const planType = state.user.plan_type;
-  
-  // Update plan name and badge
-  let planLabel = 'Free Plan';
-  if (isPro) {
-    if (planType === 'trial') planLabel = '🎉 Pro Trial';
-    else if (planType === 'lifetime') planLabel = '👑 Pro Lifetime';
-    else if (planType === 'yearly') planLabel = '👑 Pro Yearly';
-    else if (planType === '6months') planLabel = '👑 Pro 6 Months';
-    else if (planType === 'monthly') planLabel = '👑 Pro Monthly';
-    else planLabel = '👑 Pro Membership';
-  }
-  
-  $('settings-plan-name').textContent = planLabel;
-  const badge = $('settings-plan-badge');
-  badge.textContent = isPro ? 'Pro' : 'Free';
-  badge.className = `badge ${isPro ? 'badge-pro' : 'badge-free'}`;
-  
-  // Plan expiry info
-  const expiryEl = $('plan-expiry-info');
-  if (isPro && planType !== 'lifetime' && state.user.plan_expires_at) {
-    const expiryDate = new Date(state.user.plan_expires_at * 1000);
-    const daysLeft = Math.max(0, Math.ceil((state.user.plan_expires_at * 1000 - Date.now()) / 86400000));
-    expiryEl.textContent = `Expires: ${expiryDate.toLocaleDateString()} (${daysLeft} day${daysLeft !== 1 ? 's' : ''} left)`;
-    expiryEl.style.display = 'block';
-  } else if (isPro && planType === 'lifetime') {
-    expiryEl.textContent = '✨ Lifetime access — never expires';
-    expiryEl.style.display = 'block';
-  } else {
-    expiryEl.style.display = 'none';
-  }
-  
-  // Trial banner
-  const trialBanner = $('trial-banner');
-  if (isPro && planType === 'trial' && state.user.trial_expires_at) {
-    const daysLeft = Math.max(0, Math.ceil((state.user.trial_expires_at * 1000 - Date.now()) / 86400000));
-    $('trial-days-left').textContent = `${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining`;
-    trialBanner.style.display = 'flex';
-  } else {
-    trialBanner.style.display = 'none';
-  }
-  
-  // Trial button state
-  const trialBtn = $('btn-start-trial');
-  if (trialBtn) {
-    if (state.user.trial_started_at || isPro) {
-      trialBtn.textContent = state.user.trial_started_at ? 'Trial Used' : 'Already Pro';
-      trialBtn.classList.add('used');
-      trialBtn.disabled = true;
-    } else {
-      trialBtn.textContent = 'Start Free Trial';
-      trialBtn.classList.remove('used');
-      trialBtn.disabled = false;
-    }
-  }
-  
-  // Highlight active plan card
-  QA('.pricing-card').forEach(card => {
-    card.classList.remove('active-plan');
-    const cardPlan = card.dataset.plan;
-    if (isPro && planType && cardPlan === planType) {
-      card.classList.add('active-plan');
-    }
-  });
-  
-  // If on trial, highlight trial card
-  if (isPro && planType === 'trial') {
-    const trialCard = $('trial-card');
-    if (trialCard) trialCard.classList.add('active-plan');
-  }
-  
-  // Load payment history
-  loadPaymentHistory();
-}
-
-async function loadPaymentHistory() {
-  try {
-    const res = await apiCall('/api/auth/subscription-status');
-    if (res.orders && res.orders.length > 0) {
-      $('payment-history-section').style.display = 'block';
-      const list = $('payment-history-list');
-      list.innerHTML = res.orders.map(o => {
-        const planNames = { monthly: 'Monthly', '6months': '6 Months', yearly: 'Yearly', lifetime: 'Lifetime' };
-        const date = new Date(o.created_at * 1000).toLocaleDateString();
-        const statusClass = o.status === 'PAID' ? 'paid' : o.status === 'FAILED' ? 'failed' : 'pending';
-        return `
-          <div class="payment-history-item">
-            <span class="pay-plan">${planNames[o.plan_type] || o.plan_type}</span>
-            <span class="pay-amount">₹${o.amount}</span>
-            <span class="pay-status ${statusClass}">${o.status}</span>
-            <span class="pay-date">${date}</span>
-          </div>
-        `;
-      }).join('');
-    } else {
-      $('payment-history-section').style.display = 'none';
-    }
-  } catch (err) {
-    // Silently fail - history is optional
-  }
-}
-
-function closeSettingsModal() {
-  settingsModal.style.display = 'none';
-}
-
-$('btn-settings-close').addEventListener('click', closeSettingsModal);
-
-function switchSettingsTab(tab) {
-  QA('.set-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.stab === tab));
-  QA('.set-panel').forEach(pan => pan.classList.toggle('active', pan.id === `set-panel-${tab}`));
-}
-
-QA('.set-tab').forEach(btn => {
+// Toggle password visibility
+function setupEyeBtn(eyeBtnId, inputId) {
+  const btn = $(eyeBtnId), inp = $(inputId);
+  if (!btn || !inp) return;
   btn.addEventListener('click', () => {
-    switchSettingsTab(btn.dataset.stab);
+    const isPass = inp.type === 'password';
+    inp.type = isPass ? 'text' : 'password';
+    btn.textContent = isPass ? '🙈' : '👁';
+  });
+}
+setupEyeBtn('login-eye-btn', 'login-password');
+setupEyeBtn('signup-eye-btn', 'signup-password');
+setupEyeBtn('reset-eye-btn', 'reset-password');
+setupEyeBtn('chpwd-eye-btn', 'chpwd-new');
+
+function showAuthView(viewId) {}
+function closeAuthModal() {}
+function openAuthModal() {}
+
+// Navigation between views
+$('btn-go-signup') && $('btn-go-signup').addEventListener('click', () => showAuthView('auth-view-signup'));
+$('btn-go-forgot') && $('btn-go-forgot').addEventListener('click', () => showAuthView('auth-view-forgot'));
+$('btn-go-login-from-signup') && $('btn-go-login-from-signup').addEventListener('click', () => showAuthView('auth-view-login'));
+$('btn-go-login-from-forgot') && $('btn-go-login-from-forgot').addEventListener('click', () => showAuthView('auth-view-login'));
+$('btn-auth-close') && $('btn-auth-close').addEventListener('click', closeAuthModal);
+$('btn-continue-guest') && $('btn-continue-guest').addEventListener('click', closeAuthModal);
+$('auth-overlay') && $('auth-overlay').addEventListener('click', (e) => {
+  if (e.target === $('auth-overlay')) closeAuthModal();
+});
+
+// ─── Auth helpers: show inline errors/success ─────────────────────────────
+function setAuthMsg(el, type, msg) {
+  if (!el) return;
+  el.textContent = msg;
+  el.className = type === 'error' ? 'auth-error' : 'auth-success';
+  authShow(el);
+}
+function clearAuthMsg(el) { if (el) { el.textContent = ''; authHide(el); } }
+
+// ─── Login form ────────────────────────────────────────────────────────────
+$('login-form') && $('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-login-submit');
+  const errEl = $('login-error');
+  clearAuthMsg(errEl);
+  const email = $('login-email').value.trim();
+  const password = $('login-password').value;
+  if (!email || !password) { setAuthMsg(errEl, 'error', 'Please fill in all fields.'); return; }
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data.errors?.[0]?.title || 'Login failed.';
+      setAuthMsg(errEl, 'error', msg);
+      if (data.verifyLink) {
+        setAuthMsg(errEl, 'error', msg + '\n\nVerification link (dev): ' + data.verifyLink);
+      }
+    } else {
+      state.user = data.user;
+      updateUserUI();
+      closeAuthModal();
+      toast(`Welcome back, ${data.user.name}! 👋`, 'success');
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error. Is the server running?');
+  }
+  btn.disabled = false; btn.textContent = 'Sign In';
+});
+
+// ─── Signup form ───────────────────────────────────────────────────────────
+$('signup-form') && $('signup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-signup-submit');
+  const errEl = $('signup-error');
+  const sucEl = $('signup-success');
+  clearAuthMsg(errEl); clearAuthMsg(sucEl);
+  const name = $('signup-name').value.trim();
+  const email = $('signup-email').value.trim();
+  const password = $('signup-password').value;
+  if (!name || !email || !password) { setAuthMsg(errEl, 'error', 'All fields are required.'); return; }
+  if (password.length < 6) { setAuthMsg(errEl, 'error', 'Password must be at least 6 characters.'); return; }
+  btn.disabled = true; btn.textContent = 'Creating account…';
+  try {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAuthMsg(errEl, 'error', data.errors?.[0]?.title || 'Signup failed.');
+    } else {
+      let msg = '✅ Account created! Check server console for verification link.';
+      if (data.verifyLink) msg += `\n\nVerify: ${data.verifyLink}`;
+      setAuthMsg(sucEl, 'success', msg);
+      $('signup-form').reset();
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error. Is the server running?');
+  }
+  btn.disabled = false; btn.textContent = 'Create Account';
+});
+
+// ─── Forgot password form ──────────────────────────────────────────────────
+$('forgot-form') && $('forgot-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-forgot-submit');
+  const errEl = $('forgot-error');
+  const sucEl = $('forgot-success');
+  clearAuthMsg(errEl); clearAuthMsg(sucEl);
+  const email = $('forgot-email').value.trim();
+  if (!email) { setAuthMsg(errEl, 'error', 'Email is required.'); return; }
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAuthMsg(errEl, 'error', data.errors?.[0]?.title || 'Failed.');
+    } else {
+      let msg = '✅ ' + data.message;
+      if (data.resetLink) msg += `\n\nDev link: ${data.resetLink}`;
+      setAuthMsg(sucEl, 'success', msg);
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error.');
+  }
+  btn.disabled = false; btn.textContent = 'Send Reset Link';
+});
+
+// ─── Reset password form ───────────────────────────────────────────────────
+$('reset-form') && $('reset-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-reset-submit');
+  const errEl = $('reset-error');
+  const sucEl = $('reset-success');
+  clearAuthMsg(errEl); clearAuthMsg(sucEl);
+  const token = $('reset-token-input').value.trim();
+  const password = $('reset-password').value;
+  if (!token) { setAuthMsg(errEl, 'error', 'Invalid or missing reset token.'); return; }
+  if (password.length < 6) { setAuthMsg(errEl, 'error', 'Password must be at least 6 characters.'); return; }
+  btn.disabled = true; btn.textContent = 'Updating…';
+  try {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAuthMsg(errEl, 'error', data.errors?.[0]?.title || 'Reset failed.');
+    } else {
+      setAuthMsg(sucEl, 'success', '✅ Password updated! You can now sign in.');
+      setTimeout(() => showAuthView('auth-view-login'), 2000);
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error.');
+  }
+  btn.disabled = false; btn.textContent = 'Update Password';
+});
+
+// ─── Google Login (Simulated) ──────────────────────────────────────────────
+function openGooglePopup(callback) {
+  const popup = $('google-popup');
+  const accountsEl = $('google-accounts');
+  accountsEl.innerHTML = '';
+  MOCK_GOOGLE_ACCOUNTS.forEach(acc => {
+    const item = document.createElement('div');
+    item.className = 'google-account-item';
+    item.innerHTML = `
+      <div class="google-account-avatar">${acc.name.charAt(0).toUpperCase()}</div>
+      <div class="google-account-info">
+        <span class="google-account-name">${acc.name}</span>
+        <span class="google-account-email">${acc.email}</span>
+      </div>`;
+    item.addEventListener('click', () => { authHide(popup); callback(acc); });
+    accountsEl.appendChild(item);
+  });
+  $('google-custom-name').value = '';
+  $('google-custom-email').value = '';
+  authShow(popup);
+}
+function closeGooglePopup() { authHide($('google-popup')); }
+$('btn-google-cancel') && $('btn-google-cancel').addEventListener('click', closeGooglePopup);
+$('btn-google-custom') && $('btn-google-custom').addEventListener('click', () => {
+  const name = $('google-custom-name').value.trim() || 'Google User';
+  const email = $('google-custom-email').value.trim();
+  if (!email) { toast('Please enter an email for the custom account.', 'error'); return; }
+  closeGooglePopup();
+  doGoogleLogin({ name, email });
+});
+
+async function doGoogleLogin(account) {
+  try {
+    const res = await fetch('/api/auth/google-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: account.name, email: account.email, googleId: 'mock-' + account.email }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.errors?.[0]?.title || 'Google login failed.', 'error');
+    } else {
+      state.user = data.user;
+      updateUserUI();
+      closeAuthModal();
+      toast(`Signed in as ${account.name} via Google 🎉`, 'success');
+    }
+  } catch(err) {
+    toast('Network error during Google login.', 'error');
+  }
+}
+
+$('btn-google-login') && $('btn-google-login').addEventListener('click', () => openGooglePopup(doGoogleLogin));
+$('btn-google-signup') && $('btn-google-signup').addEventListener('click', () => openGooglePopup(doGoogleLogin));
+
+// ─── User Avatar Button ────────────────────────────────────────────────────
+$('btn-user-account') && $('btn-user-account').addEventListener('click', () => {
+  if (state.user) {
+    openSettingsModal();
+  } else {
+    openAuthModal();
+  }
+});
+
+// ─── Update UI based on auth state ────────────────────────────────────────
+function updateUserUI() {
+  const avatarIcon = $('user-avatar-display');
+  if (!avatarIcon) return;
+  if (state.user) {
+    const isPro = state.user.plan === 'Pro';
+    avatarIcon.className = 'user-avatar-icon logged-in' + (isPro ? ' pro-user' : '');
+    const initial = (state.user.name || state.user.email || '?').charAt(0).toUpperCase();
+    avatarIcon.textContent = initial;
+    avatarIcon.title = `${state.user.name} (${state.user.plan})`;
+  } else {
+    avatarIcon.className = 'user-avatar-icon';
+    avatarIcon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+    avatarIcon.title = 'Sign In';
+  }
+}
+
+async function checkSession() {
+  state.user = null;
+  updateUserUI();
+}
+checkSession();
+
+// Check for reset-password hash on load
+(function checkResetTokenInUrl() {
+  const hash = window.location.hash;
+  if (hash.startsWith('#reset-password?token=')) {
+    const token = hash.replace('#reset-password?token=', '').split('&')[0];
+    if (token) {
+      const input = $('reset-token-input');
+      if (input) input.value = token;
+      showAuthView('auth-view-reset');
+      history.replaceState(null, '', '/');
+    }
+  }
+  // Check for payment return
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.get('payment_status') === 'success') {
+    const orderId = searchParams.get('order_id');
+    if (orderId) handlePaymentReturn(orderId);
+    history.replaceState(null, '', '/');
+  }
+})();
+
+// ─── Logout ───────────────────────────────────────────────────────────────
+async function doLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  } catch(e) {}
+  state.user = null;
+  updateUserUI();
+  closeSettingsModal();
+  toast('Signed out.', 'success');
+}
+$('btn-settings-logout') && $('btn-settings-logout').addEventListener('click', doLogout);
+
+// ─── Account Settings Modal ────────────────────────────────────────────────
+function openSettingsModal() {
+  if (!state.user) return;
+  $('settings-display-name').textContent = state.user.name || 'User';
+  $('settings-display-email').textContent = state.user.email || '';
+  const badge = $('settings-plan-badge');
+  if (badge) {
+    badge.textContent = state.user.plan || 'Free';
+    badge.className = 'plan-badge' + (state.user.plan === 'Pro' ? ' pro' : '');
+  }
+  $('profile-name').value = state.user.name || '';
+  $('profile-email').value = state.user.email || '';
+  // Security tab: show/hide Google notice
+  const googleNotice = $('security-google-notice');
+  const emailSection = $('security-email-section');
+  if (state.user.provider === 'google') {
+    authShow(googleNotice); authHide(emailSection);
+  } else {
+    authHide(googleNotice); authShow(emailSection);
+  }
+  // Settings tabs: reset to profile
+  switchSettingsTab('profile');
+  // Reset delete confirm
+  authHide($('delete-confirm'));
+  clearAuthMsg($('profile-error')); clearAuthMsg($('profile-success'));
+  clearAuthMsg($('chpwd-error')); clearAuthMsg($('chpwd-success'));
+  clearAuthMsg($('delete-error'));
+  authShow($('settings-overlay'));
+  loadSubscriptionStatus();
+}
+function closeSettingsModal() { authHide($('settings-overlay')); }
+$('btn-settings-close') && $('btn-settings-close').addEventListener('click', closeSettingsModal);
+$('settings-overlay') && $('settings-overlay').addEventListener('click', (e) => {
+  if (e.target === $('settings-overlay')) closeSettingsModal();
+});
+
+// Settings tab switching
+function switchSettingsTab(tabName) {
+  QA('.settings-tab').forEach(t => t.classList.toggle('active', t.dataset.stab === tabName));
+  QA('.settings-panel').forEach(p => {
+    if (p.id === 'stab-' + tabName) {
+      p.classList.add('active');
+      p.style.display = 'block';
+    } else {
+      p.classList.remove('active');
+      p.style.display = 'none';
+    }
+  });
+}
+QA('.settings-tab').forEach(tab => {
+  tab.addEventListener('click', () => switchSettingsTab(tab.dataset.stab));
+});
+
+// ─── Profile Update ────────────────────────────────────────────────────────
+$('profile-form') && $('profile-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-profile-save');
+  const errEl = $('profile-error');
+  const sucEl = $('profile-success');
+  clearAuthMsg(errEl); clearAuthMsg(sucEl);
+  const name = $('profile-name').value.trim();
+  const email = $('profile-email').value.trim();
+  if (!name || !email) { setAuthMsg(errEl, 'error', 'Name and email are required.'); return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/auth/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAuthMsg(errEl, 'error', data.errors?.[0]?.title || 'Update failed.');
+    } else {
+      setAuthMsg(sucEl, 'success', '✅ Profile updated!');
+      state.user.name = name; state.user.email = email;
+      updateUserUI();
+      $('settings-display-name').textContent = name;
+      $('settings-display-email').textContent = email;
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error.');
+  }
+  btn.disabled = false; btn.textContent = 'Save Changes';
+});
+
+// ─── Change Password ───────────────────────────────────────────────────────
+$('change-password-form') && $('change-password-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-chpwd-submit');
+  const errEl = $('chpwd-error');
+  const sucEl = $('chpwd-success');
+  clearAuthMsg(errEl); clearAuthMsg(sucEl);
+  const current_password = $('chpwd-current').value;
+  const new_password = $('chpwd-new').value;
+  if (!current_password || !new_password) { setAuthMsg(errEl, 'error', 'Both fields required.'); return; }
+  if (new_password.length < 6) { setAuthMsg(errEl, 'error', 'New password must be 6+ characters.'); return; }
+  btn.disabled = true; btn.textContent = 'Updating…';
+  try {
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password, new_password }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAuthMsg(errEl, 'error', data.errors?.[0]?.title || 'Failed to change password.');
+    } else {
+      setAuthMsg(sucEl, 'success', '✅ Password updated!');
+      $('change-password-form').reset();
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error.');
+  }
+  btn.disabled = false; btn.textContent = 'Update Password';
+});
+
+// ─── Delete Account ────────────────────────────────────────────────────────
+$('btn-show-delete') && $('btn-show-delete').addEventListener('click', () => {
+  authShow($('delete-confirm'));
+  $('btn-show-delete').style.display = 'none';
+});
+$('btn-delete-cancel') && $('btn-delete-cancel').addEventListener('click', () => {
+  authHide($('delete-confirm'));
+  $('btn-show-delete').style.display = '';
+  clearAuthMsg($('delete-error'));
+});
+$('btn-delete-confirm') && $('btn-delete-confirm').addEventListener('click', async () => {
+  const btn = $('btn-delete-confirm');
+  const errEl = $('delete-error');
+  clearAuthMsg(errEl);
+  const password = $('delete-password').value;
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    const body = { password };
+    const res = await fetch('/api/auth/delete-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAuthMsg(errEl, 'error', data.errors?.[0]?.title || 'Deletion failed.');
+    } else {
+      state.user = null;
+      updateUserUI();
+      closeSettingsModal();
+      toast('Account deleted. Goodbye! 👋', 'success');
+    }
+  } catch(err) {
+    setAuthMsg(errEl, 'error', 'Network error.');
+  }
+  btn.disabled = false; btn.textContent = 'Delete My Account';
+});
+
+// ─── Subscription & Payment ────────────────────────────────────────────────
+async function loadSubscriptionStatus() {
+  if (!state.user) return;
+  try {
+    const res = await fetch('/api/auth/subscription-status', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderSubscriptionUI(data);
+  } catch(e) {}
+}
+
+function renderSubscriptionUI(data) {
+  const plan = data.plan || 'Free';
+  const planType = data.plan_type;
+  const trialExpires = data.trial_expires_at;
+  const planExpires = data.plan_expires_at;
+  const orders = data.orders || [];
+
+  // Update sub-plan-badge
+  const badge = $('sub-plan-badge');
+  if (badge) {
+    badge.textContent = plan;
+    badge.className = 'plan-badge' + (plan === 'Pro' ? ' pro' : '') + (planType === 'trial' ? ' trial' : '');
+  }
+
+  // Expires row
+  const expiresRow = $('plan-expires-row');
+  const expiresVal = $('sub-plan-expires');
+  if (plan === 'Pro' && planExpires) {
+    authShow(expiresRow);
+    const d = new Date(planExpires * 1000);
+    if (expiresVal) expiresVal.textContent = d.toLocaleDateString('en-IN', { year:'numeric', month:'short', day:'numeric' });
+  } else {
+    authHide(expiresRow);
+  }
+
+  // Trial banner: show only for Free users who haven't used trial
+  const trialBanner = $('trial-banner');
+  if (plan === 'Free' && !data.trial_started_at) {
+    authShow(trialBanner);
+  } else {
+    authHide(trialBanner);
+  }
+
+  // Mark active plan on pricing cards
+  QA('.pricing-card').forEach(card => {
+    const isActive = plan === 'Pro' && card.dataset.plan === planType;
+    card.classList.toggle('active-plan', isActive);
+  });
+
+  // Payment history
+  const histEl = $('payment-history');
+  const histList = $('payment-history-list');
+  if (orders.length > 0 && histEl && histList) {
+    authShow(histEl);
+    histList.innerHTML = orders.map(o => {
+      const d = new Date((o.paid_at || o.created_at) * 1000);
+      const statusClass = o.status === 'PAID' ? 'paid' : (o.status === 'PENDING' ? 'pending' : 'failed');
+      return `<div class="payment-history-item">
+        <div class="pay-info">
+          <span class="pay-plan">${o.plan_type}</span>
+          <span class="pay-amount">₹${o.amount}</span>
+        </div>
+        <div class="pay-meta">
+          <span class="pay-status ${statusClass}">${o.status}</span>
+          <span class="pay-date">${d.toLocaleDateString('en-IN')}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } else if (histEl) {
+    authHide(histEl);
+  }
+}
+
+// Start trial
+$('btn-start-trial') && $('btn-start-trial').addEventListener('click', async () => {
+  const btn = $('btn-start-trial');
+  btn.disabled = true; btn.textContent = 'Starting…';
+  try {
+    const res = await fetch('/api/auth/start-trial', { method: 'POST', credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.errors?.[0]?.title || 'Could not start trial.', 'error');
+    } else {
+      state.user.plan = 'Pro';
+      updateUserUI();
+      toast(data.message || '🎉 7-day Pro trial started!', 'success');
+      await loadSubscriptionStatus();
+    }
+  } catch(e) {
+    toast('Network error.', 'error');
+  }
+  btn.disabled = false; btn.textContent = 'Try Free';
+});
+
+// Subscribe buttons → Cashfree checkout
+QA('.btn-subscribe').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!state.user) {
+      toast('Please sign in to subscribe.', 'info');
+      openAuthModal();
+      return;
+    }
+    const planType = btn.dataset.plan;
+    await initiatePayment(planType);
   });
 });
 
-$('form-update-profile').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const name = $('profile-name').value;
-  const email = $('profile-email').value;
+async function initiatePayment(planType) {
+  const overlay = $('checkout-overlay');
+  authShow(overlay);
   try {
-    const res = await apiCall('/api/auth/update-profile', 'POST', { name, email });
-    state.user.name = name;
-    state.user.email = email;
-    renderUserAccountBar();
-    toast(res.message || 'Profile updated.', 'success');
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-$('form-change-password').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const current_password = $('sec-current-password').value;
-  const new_password = $('sec-new-password').value;
-  try {
-    const res = await apiCall('/api/auth/change-password', 'POST', { current_password, new_password });
-    toast(res.message || 'Password changed successfully.', 'success');
-    $('form-change-password').reset();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-$('form-delete-account').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const password = $('delete-password').value;
-  if (!confirm('Are you absolutely sure you want to permanently delete your account? This action cannot be undone.')) {
-    return;
-  }
-  try {
-    await apiCall('/api/auth/delete-account', 'POST', { password });
-    state.user = null;
-    renderUserAccountBar();
-    applyFeatureLimits();
-    closeSettingsModal();
-    toast('Account deleted permanently.', 'info');
-    if (state.mode === 'auto') autoArrange();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
-// ─── Cashfree Payment Flow ────────────────────────────────────────────────────
-
-// Initialize Cashfree SDK
-let cashfreeInstance = null;
-let currentCashfreeMode = null;
-function getCashfree(mode = 'sandbox') {
-  if (!cashfreeInstance || currentCashfreeMode !== mode) {
-    if (typeof Cashfree !== 'undefined') {
-      cashfreeInstance = Cashfree({ mode: mode });
-      currentCashfreeMode = mode;
-    }
-  }
-  return cashfreeInstance;
-}
-
-async function initiatePurchase(planType) {
-  if (!state.user) {
-    toast('Please sign in to purchase a subscription.', 'warning');
-    showAuthModal('login');
-    return;
-  }
-  
-  const btn = document.querySelector(`.btn-buy[data-plan="${planType}"]`);
-  if (btn) {
-    btn.classList.add('loading');
-    btn.disabled = true;
-  }
-  
-  try {
-    // Create order on server
-    const res = await apiCall('/api/payment/create-order', 'POST', { plan_type: planType });
-    
-    if (!res.payment_session_id) {
-      throw new Error('Failed to create payment session.');
-    }
-    
-    // Get Cashfree instance with server environment mode (sandbox or production)
-    const cf = getCashfree(res.cf_env || 'sandbox');
-    if (!cf) {
-      throw new Error('Cashfree SDK not loaded. Please refresh the page and try again.');
-    }
-    
-    // Store order ID for verification on return
-    sessionStorage.setItem('pending_order_id', res.order_id);
-    sessionStorage.setItem('pending_plan_type', planType);
-    
-    // Launch Cashfree checkout
-    const checkoutOptions = {
-      paymentSessionId: res.payment_session_id,
-      redirectTarget: '_self'
-    };
-    
-    cf.checkout(checkoutOptions).then(result => {
-      if (result.error) {
-        toast(`Payment failed: ${result.error.message}`, 'error');
-      } else if (result.redirect) {
-        console.log('Redirecting to Cashfree...');
-      } else if (result.paymentDetails) {
-        handlePaymentReturn(res.order_id);
-      }
-    }).catch(err => {
-      toast('Payment was cancelled or failed.', 'error');
+    const res = await fetch('/api/payment/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_type: planType }),
+      credentials: 'include'
     });
-    
-  } catch (err) {
-    toast(err.message || 'Failed to initiate payment.', 'error');
-  } finally {
-    if (btn) {
-      btn.classList.remove('loading');
-      btn.disabled = false;
+    const data = await res.json();
+    if (!res.ok) {
+      authHide(overlay);
+      const msg = data.errors?.[0]?.title || 'Payment initiation failed.';
+      toast(msg, 'error');
+      return;
     }
+    // Try Cashfree JS SDK
+    if (window.Cashfree && data.payment_session_id) {
+      const cashfree = window.Cashfree({ mode: data.cf_env === 'production' ? 'production' : 'sandbox' });
+      authHide(overlay);
+      cashfree.checkout({
+        paymentSessionId: data.payment_session_id,
+        returnUrl: window.location.origin + '/?payment_status=success&order_id=' + data.order_id
+      });
+    } else {
+      // Fallback: server not configured with Cashfree keys
+      authHide(overlay);
+      toast('💡 Payment gateway not configured. Set CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET on the server.', 'info');
+    }
+  } catch(err) {
+    authHide(overlay);
+    toast('Network error during payment.', 'error');
   }
 }
 
 async function handlePaymentReturn(orderId) {
-  if (!orderId) return;
-  
-  toast('Verifying payment...', 'info', 5000);
-  
-  let attempts = 0;
-  const maxAttempts = 5;
-  
-  const verify = async () => {
-    try {
-      const res = await apiCall('/api/payment/verify', 'POST', { order_id: orderId });
-      if (res.status === 'PAID') {
-        state.user.plan = res.plan;
-        state.user.plan_type = res.plan_type;
-        renderUserAccountBar();
-        applyFeatureLimits();
-        toast(res.message || '🎉 Payment successful!', 'success', 5000);
-        if (state.mode === 'auto') autoArrange();
-        
-        sessionStorage.removeItem('pending_order_id');
-        sessionStorage.removeItem('pending_plan_type');
-        
-        await checkSession();
-        return true;
-      } else if (attempts < maxAttempts) {
-        attempts++;
-        setTimeout(verify, 2000);
-        return false;
-      } else {
-        toast('Payment processing is taking longer than expected. Your plan will be activated shortly.', 'info', 8000);
-        return false;
-      }
-    } catch (err) {
-      if (attempts < maxAttempts) {
-        attempts++;
-        setTimeout(verify, 2000);
-      } else {
-        toast('Could not verify payment. If you were charged, your plan will be activated automatically.', 'warning', 8000);
-      }
-      return false;
-    }
-  };
-  
-  verify();
-}
-
-async function startFreeTrial() {
-  if (!state.user) {
-    toast('Please sign in to start a free trial.', 'warning');
-    showAuthModal('login');
-    return;
-  }
-  
-  const btn = $('btn-start-trial');
-  if (btn) {
-    btn.classList.add('loading');
-    btn.disabled = true;
-  }
-  
+  toast('Verifying payment…', 'info');
   try {
-    const res = await apiCall('/api/auth/start-trial', 'POST');
-    state.user.plan = res.plan;
-    state.user.plan_type = res.plan_type;
-    state.user.trial_expires_at = res.trial_expires_at;
-    state.user.trial_started_at = Math.floor(Date.now() / 1000);
-    
-    renderUserAccountBar();
-    applyFeatureLimits();
-    updateSubscriptionUI();
-    toast(res.message || '🎉 Free trial activated!', 'success', 5000);
-    if (state.mode === 'auto') autoArrange();
-  } catch (err) {
-    toast(err.message || 'Failed to start trial.', 'error');
-  } finally {
-    if (btn) {
-      btn.classList.remove('loading');
-      btn.disabled = false;
-    }
-  }
-}
-
-// Pricing button event listeners
-$('btn-start-trial').addEventListener('click', startFreeTrial);
-
-QA('.btn-buy').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const planType = btn.dataset.plan;
-    if (planType) initiatePurchase(planType);
-  });
-});
-
-// Check for payment return URL parameters on page load
-function checkPaymentReturn() {
-  const params = new URLSearchParams(window.location.search);
-  const paymentStatus = params.get('payment_status');
-  const orderId = params.get('order_id') || sessionStorage.getItem('pending_order_id');
-  
-  if (paymentStatus && orderId) {
-    const url = new URL(window.location);
-    url.searchParams.delete('payment_status');
-    url.searchParams.delete('order_id');
-    window.history.replaceState({}, '', url.pathname + url.hash);
-    
-    setTimeout(() => handlePaymentReturn(orderId), 1500);
-  }
-}
-
-setTimeout(checkPaymentReturn, 500);
-
-// Feature limits applying
-function applyFeatureLimits() {
-  const isPro = state.user && state.user.plan === 'Pro';
-  QA('.pro-only-feature').forEach(el => {
-    el.style.color = isPro ? 'var(--text)' : 'var(--text-muted)';
-    const icon = el.querySelector('.feat-icon');
-    if (icon) icon.style.color = isPro ? 'var(--success)' : 'var(--warning)';
-  });
-}
-
-// Watch for DPI quality gating
-QA('input[name="dpi"]').forEach(radio => {
-  radio.addEventListener('click', () => {
-    const isPro = state.user && state.user.plan === 'Pro';
-    if (radio.value === '600' && !isPro) {
-      toast('👑 600 DPI Print Quality is a Pro feature. Please sign in/register and upgrade to Pro.', 'warning', 5000);
-      const r300 = QA('input[name="dpi"][value="300"]')[0];
-      if (r300) r300.checked = true;
-      updateStatusBar();
-    }
-  });
-});
-
-async function checkSession() {
-  try {
-    const res = await apiCall('/api/auth/me');
-    if (res.user) {
-      state.user = res.user;
+    const res = await fetch('/api/payment/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId }),
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (data.status === 'PAID') {
+      state.user = state.user || {};
+      state.user.plan = data.plan || 'Pro';
+      updateUserUI();
+      toast(data.message || '🎉 Payment successful! Pro plan activated.', 'success');
+      await loadSubscriptionStatus();
     } else {
+      toast(data.message || 'Payment is being processed.', 'info');
+    }
+  } catch(e) {
+    toast('Could not verify payment.', 'error');
+  }
+}
+
+// Session timeout: poll every 5 minutes to keep session alive / detect expiry
+let sessionPollInterval = setInterval(async () => {
+  if (!state.user) return;
+  try {
+    const res = await fetch('/api/auth/me', { credentials: 'include' });
+    if (!res.ok) {
       state.user = null;
+      updateUserUI();
+      toast('Session expired. Please sign in again.', 'info');
+      clearInterval(sessionPollInterval);
     }
-  } catch (err) {
-    state.user = null;
-  }
-  renderUserAccountBar();
-  applyFeatureLimits();
-}
+  } catch(e) {}
+}, 5 * 60 * 1000);
 
-function handleHashChange() {
-  const hash = window.location.hash;
-  if (hash.startsWith('#reset-password')) {
-    const match = hash.match(/token=([0-9a-f]{64})/);
-    if (match) {
-      showAuthModal('reset');
-      toast('Please enter a new password.', 'info');
-    } else {
-      toast('Invalid reset token in URL.', 'error');
-      window.location.hash = '';
-    }
-  }
-}
-window.addEventListener('hashchange', handleHashChange);
-
-
-// ─── INITIALIZATION ───────────────────────────────────────────────────────────
-// Initial render and fit
-renderCanvas();
-setTimeout(() => { fitPage(); snap(); }, 100);
-
-// Check auth session and hash token on startup
-checkSession();
-handleHashChange();
-
-// Keyboard: spacebar pan
-window.addEventListener('keydown', e => {
-  if (e.code === 'Space' && !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
-    e.preventDefault();
-  }
-});
-
-
-// ─── CANVA REDESIGN ADDITIONAL CONTROLS & LOGIC ─────────────────────────────
-
-// 1. Accordion Section toggling
-QA('.editor-section-header').forEach(header => {
-  header.addEventListener('click', () => {
-    const section = header.parentElement;
-    section.classList.toggle('expanded');
-  });
-});
-
-// 2. Photo Size search/filtering
-const searchInput = $('photo-size-search');
-if (searchInput) {
-  const originalOptions = Array.from(photoPreset.options);
-  searchInput.addEventListener('input', () => {
-    const query = searchInput.value.toLowerCase().trim();
-    photoPreset.innerHTML = '';
-    
-    // Always append options that match query
-    let matchedAny = false;
-    originalOptions.forEach(opt => {
-      if (opt.text.toLowerCase().includes(query)) {
-        photoPreset.appendChild(opt.cloneNode(true));
-        matchedAny = true;
-      }
-    });
-
-    // If active photo preset is not in list anymore, select the first matching
-    if (query && matchedAny) {
-      const firstVal = photoPreset.options[0].value;
-      if (photoPreset.value !== state.photoSize.preset) {
-        photoPreset.value = firstVal;
-        photoPreset.dispatchEvent(new Event('change'));
-      }
-    }
-  });
-}
-
-// 3. Brightness, Contrast, Saturation sliders values mapping
-const bSlider = $('slider-brightness');
-const cSlider = $('slider-contrast');
-const sSlider = $('slider-saturation');
-
-function applyFiltersUpdate() {
-  if (bSlider) state.filters.brightness = parseInt(bSlider.value, 10);
-  if (cSlider) state.filters.contrast = parseInt(cSlider.value, 10);
-  if (sSlider) state.filters.saturation = parseInt(sSlider.value, 10);
-
-  if (state.selected.length > 0) {
-    state.selected.forEach(id => {
-      const item = state.items.find(it => it.id === id);
-      if (item) {
-        item.brightness = state.filters.brightness;
-        item.contrast = state.filters.contrast;
-        item.saturation = state.filters.saturation;
-      }
-    });
-  } else {
-    state.items.forEach(item => {
-      item.brightness = state.filters.brightness;
-      item.contrast = state.filters.contrast;
-      item.saturation = state.filters.saturation;
-    });
-  }
-  renderCanvas();
-}
-
-if (bSlider) {
-  bSlider.addEventListener('input', () => {
-    $('brightness-val').textContent = bSlider.value;
-    applyFiltersUpdate();
-  });
-}
-if (cSlider) {
-  cSlider.addEventListener('input', () => {
-    $('contrast-val').textContent = cSlider.value;
-    applyFiltersUpdate();
-  });
-}
-if (sSlider) {
-  sSlider.addEventListener('input', () => {
-    $('saturation-val').textContent = sSlider.value;
-    applyFiltersUpdate();
-  });
-}
-
-// 4. Alignment / Actions layout panel buttons mapping
-const btnLayoutCenter = $('btn-layout-center');
-const btnLayoutDup = $('btn-layout-duplicate');
-const btnLayoutDel = $('btn-layout-delete');
-
-if (btnLayoutCenter) {
-  btnLayoutCenter.addEventListener('click', () => {
-    if (!state.selected.length) {
-      toast('Select items on the canvas to center them.', 'info');
-      return;
-    }
-    state.selected.forEach(id => {
-      const it = state.items.find(i => i.id === id);
-      if (!it) return;
-      it.x = (state.page.w - it.w) / 2;
-      it.y = (state.page.h - it.h) / 2;
-    });
-    renderCanvas();
-    snap();
-    toast('Centered selected items on sheet!', 'success');
-  });
-}
-
-if (btnLayoutDup) {
-  btnLayoutDup.addEventListener('click', () => {
-    if (!state.selected.length) {
-      toast('Select items on the canvas to duplicate.', 'info');
-      return;
-    }
-    duplicateSelected();
-  });
-}
-
-if (btnLayoutDel) {
-  btnLayoutDel.addEventListener('click', () => {
-    if (!state.selected.length) {
-      toast('Select items on the canvas to delete.', 'info');
-      return;
-    }
-    deleteSelectedItems();
-  });
-}
-
-// 5. Live Property Inspector update
-function updatePropertiesPanel() {
-  const noSel = $('no-selection-properties');
-  const activeProps = $('active-properties');
-  if (!noSel || !activeProps) return;
-
-  if (state.selected.length === 1) {
-    const item = state.items.find(it => it.id === state.selected[0]);
-    if (!item) {
-      noSel.style.display = 'flex';
-      activeProps.style.display = 'none';
-      return;
-    }
-    const photo = state.photos.find(p => p.id === item.photoId);
-
-    noSel.style.display = 'none';
-    activeProps.style.display = 'block';
-
-    $('prop-w').textContent = Math.round(item.w) + ' mm';
-    $('prop-h').textContent = Math.round(item.h) + ' mm';
-    $('prop-x').textContent = Math.round(item.x) + ' mm';
-    $('prop-y').textContent = Math.round(item.y) + ' mm';
-    $('prop-rotation').textContent = '0°';
-    $('prop-scale').textContent = (item.w / state.photoSize.w).toFixed(2);
-    $('prop-bg-status').textContent = (photo && photo.hasBg) ? '✨ Transparent' : 'Original BG';
-    
-    // Add/remove class to status-badge depending on status
-    const bgStatusEl = $('prop-bg-status');
-    if (photo && photo.hasBg) {
-      bgStatusEl.className = 'prop-val-box status-badge';
-    } else {
-      bgStatusEl.className = 'prop-val-box';
-    }
-
-    // Sync adjustment sliders to active item
-    if (item.brightness !== undefined && bSlider) {
-      bSlider.value = item.brightness;
-      $('brightness-val').textContent = item.brightness;
-    }
-    if (item.contrast !== undefined && cSlider) {
-      cSlider.value = item.contrast;
-      $('contrast-val').textContent = item.contrast;
-    }
-    if (item.saturation !== undefined && sSlider) {
-      sSlider.value = item.saturation;
-      $('saturation-val').textContent = item.saturation;
-    }
-  } else {
-    noSel.style.display = 'flex';
-    activeProps.style.display = 'none';
-  }
-}
-
-// Intercept renderCanvas to update properties panel
-const originalRenderCanvas = renderCanvas;
-renderCanvas = function() {
-  originalRenderCanvas.apply(this, arguments);
-  updatePropertiesPanel();
-};
-
+// ─── END AUTH SYSTEM ──────────────────────────────────────────────────────────
 
 // ─── END ──────────────────────────────────────────────────────────────────────
 }); // DOMContentLoaded

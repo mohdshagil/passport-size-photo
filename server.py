@@ -1039,6 +1039,7 @@ class CombinedHandler(http.server.SimpleHTTPRequestHandler):
                     return
 
                 plan = PLAN_CONFIG[plan_type]
+                order_id = 'ppm-' + str(uuid.uuid4()).replace('-', '')[:24]
                 host_hdr = self.headers.get('Host', f'localhost:{PORT}')
                 proto = 'https' if not host_hdr.startswith('localhost') and not host_hdr.startswith('127.0.0.1') else 'http'
                 return_url = f'{proto}://{host_hdr}/?payment_status=success&order_id=' + '{order_id}'
@@ -1343,13 +1344,13 @@ class CombinedHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header(
             'Content-Security-Policy',
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-eval' blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://sdk.cashfree.com; "
+            "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net https://www.google.com https://www.googletagservices.com https://sdk.cashfree.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data: blob:; "
-            "connect-src 'self' blob: data: https://cdn.jsdelivr.net https://unpkg.com https://staticimgly.com https://*.staticimgly.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.cdn.hf.co https://*.aws.cdn.hf.co https://*.amazonaws.com https://*.cloudfront.net https://sandbox.cashfree.com https://api.cashfree.com; "
+            "img-src 'self' data: blob: https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net; "
+            "connect-src 'self' blob: data: https://cdn.jsdelivr.net https://unpkg.com https://staticimgly.com https://*.staticimgly.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.cdn.hf.co https://*.aws.cdn.hf.co https://*.amazonaws.com https://*.cloudfront.net https://pagead2.googlesyndication.com https://*.cashfree.com https://sandbox.cashfree.com https://api.cashfree.com; "
             "worker-src 'self' blob:; "
-            "frame-src 'self' https://sdk.cashfree.com https://sandbox.cashfree.com https://api.cashfree.com; "
+            "frame-src 'self' https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.google.com https://*.cashfree.com; "
             "base-uri 'self'; "
             "form-action 'self';"
         )
