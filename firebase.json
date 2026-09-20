@@ -1,0 +1,20 @@
+{
+  "hosting": {
+    "site": "passport-photo-online-free",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "**/__pycache__/**",
+      "users.db",
+      "passport-photo-maker.zip"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

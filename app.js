@@ -106,8 +106,14 @@ const borderControls  = $('border-controls');
 const borderWidthSlider = $('border-width');
 const borderWidthVal  = $('border-width-val');
 const borderColorPicker = $('border-color-picker');
-const borderColorText = $('border-color-text');
 const btnResetBg      = $('btn-reset-bg');
+
+const sliderBrightness = $('slider-brightness');
+const brightnessVal    = $('brightness-val');
+const sliderContrast   = $('slider-contrast');
+const contrastVal      = $('contrast-val');
+const sliderSaturation = $('slider-saturation');
+const saturationVal    = $('saturation-val');
 
 const pagePreset      = $('page-preset');
 const customPageDims  = $('custom-page-dims');
@@ -486,6 +492,14 @@ function updateSelectedCard() {
       selectedPreview.appendChild(imgEl);
     }
     imgEl.src = photo.src;
+    const b = state.filters.brightness ?? 100;
+    const c = state.filters.contrast ?? 100;
+    const s = state.filters.saturation ?? 100;
+    if (b !== 100 || c !== 100 || s !== 100) {
+      imgEl.style.filter = `brightness(${b}%) contrast(${c}%) saturate(${s}%)`;
+    } else {
+      imgEl.style.filter = '';
+    }
     selectedName.textContent = photo.name;
   } else {
     imgEl?.remove();
@@ -1009,6 +1023,37 @@ borderColorPicker.addEventListener('change', snap);
 QA('[data-border-color]').forEach(sw => {
   sw.addEventListener('click', () => { applyBorderColor(sw.dataset.borderColor); snap(); });
 });
+
+// Filters & Adjustments
+if (sliderBrightness) {
+  sliderBrightness.addEventListener('input', () => {
+    state.filters.brightness = parseFloat(sliderBrightness.value);
+    if (brightnessVal) brightnessVal.textContent = sliderBrightness.value;
+    renderCanvas();
+    updateSelectedCard();
+  });
+  sliderBrightness.addEventListener('change', snap);
+}
+
+if (sliderContrast) {
+  sliderContrast.addEventListener('input', () => {
+    state.filters.contrast = parseFloat(sliderContrast.value);
+    if (contrastVal) contrastVal.textContent = sliderContrast.value;
+    renderCanvas();
+    updateSelectedCard();
+  });
+  sliderContrast.addEventListener('change', snap);
+}
+
+if (sliderSaturation) {
+  sliderSaturation.addEventListener('input', () => {
+    state.filters.saturation = parseFloat(sliderSaturation.value);
+    if (saturationVal) saturationVal.textContent = sliderSaturation.value;
+    renderCanvas();
+    updateSelectedCard();
+  });
+  sliderSaturation.addEventListener('change', snap);
+}
 
 
 // ─── PAGE SETTINGS ────────────────────────────────────────────────────────────
@@ -1974,6 +2019,14 @@ function syncControls() {
   borderColorPicker.value = state.border.color;
   borderColorText.textContent = state.border.color;
   QA('[data-border-color]').forEach(sw => sw.classList.toggle('active', sw.dataset.borderColor === state.border.color));
+
+  // Filters
+  if (sliderBrightness) sliderBrightness.value = state.filters.brightness ?? 100;
+  if (brightnessVal) brightnessVal.textContent = state.filters.brightness ?? 100;
+  if (sliderContrast) sliderContrast.value = state.filters.contrast ?? 100;
+  if (contrastVal) contrastVal.textContent = state.filters.contrast ?? 100;
+  if (sliderSaturation) sliderSaturation.value = state.filters.saturation ?? 100;
+  if (saturationVal) saturationVal.textContent = state.filters.saturation ?? 100;
 
   // Spacing
   spacingH.value = state.spacing.h; spacingHVal.textContent = state.spacing.h;
