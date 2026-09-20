@@ -788,6 +788,7 @@ async function removeBg(photo) {
     return await _imglyRemoveBg(inputBlob, {
       publicPath: window.location.origin + '/lib/imgly/',
       model: modelName,
+      proxyToWorker: false,
       output: { format: 'image/png', quality: 1.0 },
       progress: (key, current, total) => {
         if (key === 'compute:inference') {
